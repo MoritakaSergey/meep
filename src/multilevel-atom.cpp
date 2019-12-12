@@ -402,11 +402,27 @@ void multilevel_susceptibility::subtract_P(field_type ft,
   }
 }
 
+typedef struct {
+  size_t sz_data;
+  size_t ntot;
+  realnum *GammaInv;                    // inv(1 + Gamma * dt / 2)
+  
+  realnumP *P[NUM_FIELD_COMPONENTS][2]; // P[c][cmp][transition][i]
+  realnumP *P_prev[NUM_FIELD_COMPONENTS][2];
+
+  realnumP *V[NUM_FIELD_COMPONENTS][2]; // V[c][cmp][crossection][i]
+  realnumP *V_prev[NUM_FIELD_COMPONENTS][2];
+
+  realnum *N;    // ntot x L array of centered grid populations N[i*L + level]
+  realnum *Ntmp; // temporary length L array of levels, used in updating  
+  realnum data[1];
+} multilevel_extended_data;
+
 void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONENTS][2],
                                                    realnum *W_prev[NUM_FIELD_COMPONENTS][2],
                                                    double dt, const grid_volume &gv,
                                                    void *P_internal_data) const {
-  multilevel_data *d = (multilevel_data *)P_internal_data;
+  multilevel_extended_data *d = (multilevel_extended_data *)P_internal_data;
   double dt2 = 0.5 * dt;
 
   // field directions and offsets for E * dP dot product.
@@ -451,14 +467,14 @@ void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONEN
       double gperpdt = gamma[t] * pi * dt;
       for (int idot = 0; idot < 3 && cdot[idot] != Dielectric; ++idot) {
         realnum *p = d->P[cdot[idot]][0][t];
-		realnum *pp = d->P_prev[cdot[idot]][0][t];
+		    realnum *pp = d->P_prev[cdot[idot]][0][t];
         realnum dP = dif(i, idot, p, pp, offs);
         realnum Pave2 = sum(i, idot, p, pp, offs);
 
         EdP32 += dP * E8[idot][0];
         EPave64 += Pave2 * E8[idot][0];
 
-		bool is_complex = d->P[cdot[idot]][1] != 0;
+		    bool is_complex = d->P[cdot[idot]][1] != 0;
         if (is_complex) {
           p = d->P[cdot[idot]][1][t];
           pp = d->P_prev[cdot[idot]][1][t];
@@ -482,14 +498,41 @@ void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONEN
     }
   }
 
+  // update v which are responsible for nonradiative oscillations
+  // of nondiagonal elements of density matrix
+
+  for (int cr = 0; cr < C; ++cr) {
+    DOCMP2 {
+      realnum *rev = d->V[0][cmp][cr];
+      realnum *imv = d->V[1][cmp][cr];
+
+      // 1. autoevolution
+      // 2. evolution due to other nonradiative oscillations
+      // 3. evolution due to radiative oscillations
+
+      for (int l = 0; l < L; l++)
+      {
+        // pick polarization influence
+
+        // pick nonradiative influence
+
+
+        LOOP_OVER_VOL_OWNED(gv, Centered, i) {
+          rev[i] = ;
+          imv[i] = ;
+        }
+      }
+    }
+  }
+
   // each P is updated as a damped harmonic oscillator
   for (int t = 0; t < T; ++t) {
     const double omega2pi = 2 * pi * omega[t];
     const double g2pi = gamma[t] * 2 * pi;
-	const double gperp = gamma[t] * pi;
+	  const double gperp = gamma[t] * pi;
     const double omega0dtsqrCorrected = omega2pi * omega2pi * dt * dt + gperp * gperp * dt * dt;
-	const double gamma1inv = 1 / (1 + g2pi * dt2);
-	const double gamma1 = (1 - g2pi * dt2);
+	  const double gamma1inv = 1 / (1 + g2pi * dt2);
+	  const double gamma1 = (1 - g2pi * dt2);
     const double dtsqr = dt * dt;
     // note that gamma[t]*2*pi = 2*gamma_perp as one would usually write it in SALT. -- AWC
 
@@ -503,11 +546,12 @@ void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONEN
 
     FOR_COMPONENTS(c) DOCMP2 {
       if (d->P[c][cmp]) {
-        const realnum *w = W[c][cmp], *s = sigma[c][component_direction(c)];
+        const realnum *w = W[c][cmp];
+        const realnum *s = sigma[c][component_direction(c)];
         const double st = sigmat[5 * t + component_direction(c)];
         if (w && s) {
-          realnum *p = d->P[c][cmp][t], *pp = d->P_prev[c][cmp][t];
-
+          realnum *p = d->P[c][cmp][t];
+          realnum *pp = d->P_prev[c][cmp][t];
           ptrdiff_t o1, o2;
           gv.cent2yee_offsets(c, o1, o2);
           o1 *= L;

@@ -372,6 +372,7 @@ protected:
 
 class multilevel_nonlinear_susceptibility : public multilevel_susceptibility {
 public:
+
   virtual void update_P(realnum *W[NUM_FIELD_COMPONENTS][2],
                         realnum *W_prev[NUM_FIELD_COMPONENTS][2], double dt, const grid_volume &gv,
                         void *P_internal_data) const;
@@ -385,6 +386,7 @@ protected:
     component cdot[3] = {Dielectric, Dielectric, Dielectric};
   };
 
+  int C; // number of nonradiative crossections
   directions pick_field_directions(const void *P_internal_data, const grid_volume &gv) const;
   offsets pick_field_offsets(const void *P_internal_data, const grid_volume &gv) const;
   double sum(int i, int idot, realnum *curr, realnum *prev, offsets offs) const;
