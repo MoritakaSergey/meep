@@ -402,4 +402,195 @@ void multilevel_susceptibility::subtract_P(field_type ft,
   }
 }
 
+void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONENTS][2],
+                                                   realnum *W_prev[NUM_FIELD_COMPONENTS][2],
+                                                   double dt, const grid_volume &gv,
+                                                   void *P_internal_data) const {
+  multilevel_data *d = (multilevel_data *)P_internal_data;
+  double dt2 = 0.5 * dt;
+
+  // field directions and offsets for E * dP dot product.
+  directions dirs = pick_field_directions(d, gv);
+  offsets offs = pick_field_offsets(d, gv);
+
+  // update N from W and P
+  realnum *GammaInv = d->GammaInv;
+  realnum *Ntmp = d->Ntmp;
+  LOOP_OVER_VOL_OWNED(gv, Centered, i) {
+    realnum *N = d->N + i * L; // N at current point, to update
+
+    // Ntmp = (I - Gamma * dt/2) * N
+    for (int l1 = 0; l1 < L; ++l1) {
+      Ntmp[l1] = 0;
+      for (int l2 = 0; l2 < L; ++l2) {
+        Ntmp[l1] += ((l1 == l2) - Gamma[l1 * L + l2] * dt2) * N[l2];
+      }
+    }
+
+    // compute E*8 at point i
+    double E8[3][2] = {{0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}};
+    component *cdot = dirs.cdot;
+    for (int idot = 0; idot < 3 && cdot[idot] != Dielectric; ++idot) {
+      realnum *w = W[cdot[idot]][0];
+      realnum *wp = W_prev[cdot[idot]][0];
+      E8[idot][0] = sum(i, idot, w, wp, offs);
+
+      bool is_complex = W[cdot[idot]][1] != 0;
+      if (is_complex) {
+        w = W[cdot[idot]][1];
+        wp = W_prev[cdot[idot]][1];
+        E8[idot][1] = sum(i, idot, w, wp, offs);
+      }
+    }
+
+    // Ntmp = Ntmp + alpha * E * dP
+    for (int t = 0; t < T; ++t) {
+      // compute 32 * E * dP and 64 * E * P at point i
+      double EdP32 = 0;
+      double EPave64 = 0;
+      double gperpdt = gamma[t] * pi * dt;
+      for (int idot = 0; idot < 3 && cdot[idot] != Dielectric; ++idot) {
+        realnum *p = d->P[cdot[idot]][0][t];
+		realnum *pp = d->P_prev[cdot[idot]][0][t];
+        realnum dP = dif(i, idot, p, pp, offs);
+        realnum Pave2 = sum(i, idot, p, pp, offs);
+
+        EdP32 += dP * E8[idot][0];
+        EPave64 += Pave2 * E8[idot][0];
+
+		bool is_complex = d->P[cdot[idot]][1] != 0;
+        if (is_complex) {
+          p = d->P[cdot[idot]][1][t];
+          pp = d->P_prev[cdot[idot]][1][t];
+          dP = dif(i, idot, p, pp, offs);
+          Pave2 = sum(i, idot, p, pp, offs);
+          EdP32 += dP * E8[idot][1];
+          EPave64 += Pave2 * E8[idot][1];
+        }
+      }
+      EdP32 *= 0.03125;    /* divide by 32 */
+      EPave64 *= 0.015625; /* divide by 64 (extra factor of 1/2 is from P_current + P_previous) */
+      for (int l = 0; l < L; ++l)
+        Ntmp[l] += alpha[l * T + t] * EdP32 + alpha[l * T + t] * gperpdt * EPave64;
+    }
+
+    // N = GammaInv * Ntmp
+    for (int l1 = 0; l1 < L; ++l1) {
+      N[l1] = 0;
+      for (int l2 = 0; l2 < L; ++l2)
+        N[l1] += GammaInv[l1 * L + l2] * Ntmp[l2];
+    }
+  }
+
+  // each P is updated as a damped harmonic oscillator
+  for (int t = 0; t < T; ++t) {
+    const double omega2pi = 2 * pi * omega[t];
+    const double g2pi = gamma[t] * 2 * pi;
+	const double gperp = gamma[t] * pi;
+    const double omega0dtsqrCorrected = omega2pi * omega2pi * dt * dt + gperp * gperp * dt * dt;
+	const double gamma1inv = 1 / (1 + g2pi * dt2);
+	const double gamma1 = (1 - g2pi * dt2);
+    const double dtsqr = dt * dt;
+    // note that gamma[t]*2*pi = 2*gamma_perp as one would usually write it in SALT. -- AWC
+
+    // figure out which levels this transition couples
+    int lp = -1, lm = -1;
+    for (int l = 0; l < L; ++l) {
+      if (alpha[l * T + t] > 0) lp = l;
+      if (alpha[l * T + t] < 0) lm = l;
+    }
+    if (lp < 0 || lm < 0) abort("invalid alpha array for transition %d", t);
+
+    FOR_COMPONENTS(c) DOCMP2 {
+      if (d->P[c][cmp]) {
+        const realnum *w = W[c][cmp], *s = sigma[c][component_direction(c)];
+        const double st = sigmat[5 * t + component_direction(c)];
+        if (w && s) {
+          realnum *p = d->P[c][cmp][t], *pp = d->P_prev[c][cmp][t];
+
+          ptrdiff_t o1, o2;
+          gv.cent2yee_offsets(c, o1, o2);
+          o1 *= L;
+          o2 *= L;
+          const realnum *N = d->N;
+
+          // directions/strides for offdiagonal terms, similar to update_eh
+          const direction d = component_direction(c);
+          direction d1 = cycle_direction(gv.dim, d, 1);
+          component c1 = direction_component(c, d1);
+          const realnum *w1 = W[c1][cmp];
+          const realnum *s1 = w1 ? sigma[c][d1] : NULL;
+          direction d2 = cycle_direction(gv.dim, d, 2);
+          component c2 = direction_component(c, d2);
+          const realnum *w2 = W[c2][cmp];
+          const realnum *s2 = w2 ? sigma[c][d2] : NULL;
+
+          if (s1 || s2) { abort("nondiagonal saturable gain is not yet supported"); }
+          else { // isotropic
+            LOOP_OVER_VOL_OWNED(gv, c, i) {
+              realnum pcur = p[i];
+              const realnum *Ni = N + i * L;
+              // dNi is population inversion for this transition
+              double dNi = 0.25 * (Ni[lp] + Ni[lp + o1] + Ni[lp + o2] + Ni[lp + o1 + o2] - Ni[lm] -
+                                   Ni[lm + o1] - Ni[lm + o2] - Ni[lm + o1 + o2]);
+              p[i] = gamma1inv * (pcur * (2 - omega0dtsqrCorrected) - gamma1 * pp[i] -
+                                  dtsqr * (st * s[i] * w[i]) * dNi);
+              pp[i] = pcur;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+multilevel_nonlinear_susceptibility::directions
+multilevel_nonlinear_susceptibility::pick_field_directions(const void *P_internal_data,
+                                                           const grid_volume &gv) const {
+  multilevel_data *d = (multilevel_data *)P_internal_data;
+  directions dirs;
+  int idot = 0;
+  FOR_COMPONENTS(c) {
+    if (d->P[c][0]) {
+      if (idot == 3) abort("bug in meep: too many polarization components");
+      dirs.cdot[idot++] = c;
+    }
+  }
+  return dirs;
+}
+
+multilevel_nonlinear_susceptibility::offsets
+multilevel_nonlinear_susceptibility::pick_field_offsets(const void *P_internal_data,
+                                                        const grid_volume &gv) const {
+  multilevel_data *d = (multilevel_data *)P_internal_data;
+  offsets o;
+  int idot = 0;
+  FOR_COMPONENTS(c) {
+    if (d->P[c][0]) {
+      if (idot == 3) abort("bug in meep: too many polarization components");
+      gv.yee2cent_offsets(c, o.o1[idot], o.o2[idot]);
+    }
+  }
+  return o;
+}
+
+double multilevel_nonlinear_susceptibility::sum(int i, int idot, realnum *curr, realnum *prev,
+                                                offsets offs) const {
+  double sumval = sum(i, idot, curr, offs) + sum(i, idot, prev, offs);
+  return sumval;
+}
+
+double multilevel_nonlinear_susceptibility::dif(int i, int idot, realnum *curr, realnum *prev,
+                                                offsets offs) const {
+  double difval = sum(i, idot, curr, offs) - sum(i, idot, prev, offs);
+  return difval;
+}
+
+double multilevel_nonlinear_susceptibility::sum(int i, int idot, realnum *vals, offsets offs) const {
+  ptrdiff_t *o1 = offs.o1;
+  ptrdiff_t *o2 = offs.o2;
+  double sumval = vals[i] + vals[i + o1[idot]] + vals[i + o2[idot]] + vals[i + o1[idot] + o2[idot]];
+  return sumval;
+}
+
 } // namespace meep

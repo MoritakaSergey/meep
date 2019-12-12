@@ -370,6 +370,28 @@ protected:
   realnum *sigmat; // 5*T transition-specific sigma-diagonal factors
 };
 
+class multilevel_nonlinear_susceptibility : public multilevel_susceptibility {
+public:
+  virtual void update_P(realnum *W[NUM_FIELD_COMPONENTS][2],
+                        realnum *W_prev[NUM_FIELD_COMPONENTS][2], double dt, const grid_volume &gv,
+                        void *P_internal_data) const;
+protected:
+  struct offsets {
+    ptrdiff_t o1[3];
+    ptrdiff_t o2[3];
+  };
+
+  struct directions {
+    component cdot[3] = {Dielectric, Dielectric, Dielectric};
+  };
+
+  directions pick_field_directions(const void *P_internal_data, const grid_volume &gv) const;
+  offsets pick_field_offsets(const void *P_internal_data, const grid_volume &gv) const;
+  double sum(int i, int idot, realnum *curr, realnum *prev, offsets offs) const;
+  double dif(int i, int idot, realnum *curr, realnum *prev, offsets offs) const;
+  double sum(int i, int idot, realnum *vals, offsets offs) const;
+};
+
 class grace;
 
 // h5file.cpp: HDF5 file I/O.  Most users, if they use this
