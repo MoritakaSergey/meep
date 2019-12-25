@@ -410,19 +410,191 @@ typedef struct {
   realnumP *P[NUM_FIELD_COMPONENTS][2]; // P[c][cmp][transition][i]
   realnumP *P_prev[NUM_FIELD_COMPONENTS][2];
 
-  realnumP *V[NUM_FIELD_COMPONENTS][2]; // V[c][cmp][crossection][i]
-  realnumP *V_prev[NUM_FIELD_COMPONENTS][2];
+  realnumP *V[2]; // V[c][crossection][i]
+  realnumP *V_prev[2];
 
   realnum *N;    // ntot x L array of centered grid populations N[i*L + level]
   realnum *Ntmp; // temporary length L array of levels, used in updating  
   realnum data[1];
 } multilevel_extended_data;
 
+
+void *multilevel_nonlinear_susceptibility::new_internal_data(realnum *W[NUM_FIELD_COMPONENTS][2],
+                                                   const grid_volume &gv) const {
+  size_t ntot = gv.ntot();
+  size_t npol = 0; // number of polarized grid components
+  FOR_COMPONENTS(c) DOCMP2 {
+    if (needs_P(c, cmp, W))
+      npol += ntot;
+  }
+
+  size_t P_size = 2 * npol * T; // number of radiative vector elements (2 because stores current and previous)
+  size_t V_size = 2 * ntot * C; // number of nonradiative scalar elements (2 because stores current and previous)
+  size_t N_size = (ntot + 1) * L; // number of population elements ( + 1*L because stores Ntmp for further calculations)
+  size_t G_size = L * L; // memory for GammaInv
+
+  size_t sz = sizeof(multilevel_data) + sizeof(realnum) * (G_size + N_size + P_size + V_size - 1);
+  multilevel_extended_data *d = (multilevel_extended_data *)malloc(sz);
+  memset(d, 0, sz);
+  d->sz_data = sz;
+  return (void *)d;
+}
+
+
+void multilevel_nonlinear_susceptibility::init_internal_data(realnum *W[NUM_FIELD_COMPONENTS][2], double dt,
+                                                   const grid_volume &gv, void *data) const {
+  multilevel_extended_data *d = (multilevel_extended_data *)data;
+  size_t sz_data = d->sz_data;
+  memset(d, 0, sz_data);
+  d->sz_data = sz_data;
+  size_t ntot = d->ntot = gv.ntot();
+
+  /* d->data points to a big block of data that holds GammaInv, P,
+     P_prev, Ntmp, and N.  We also initialize a bunch of convenience
+     pointer in d to point to the corresponding data in d->data, so
+     that we don't have to remember in other functions how d->data is
+     laid out. */
+
+  // First L*L data block
+  d->GammaInv = d->data;
+  for (int i = 0; i < L; ++i)
+    for (int j = 0; j < L; ++j)
+      d->GammaInv[i * L + j] = (i == j) + Gamma[i * L + j] * dt / 2;
+  if (!invert(d->GammaInv, L)) abort("multilevel_susceptibility: I + Gamma*dt/2 matrix singular");
+  size_t G_size = L * L;
+
+  //Second data block
+  realnum *P = d->data + G_size;
+  realnum *P_prev = P + ntot;
+  size_t P_size = 0;
+  FOR_COMPONENTS(c) DOCMP2 {
+    if (needs_P(c, cmp, W)) {
+      d->P[c][cmp] = new realnumP[T];
+      d->P_prev[c][cmp] = new realnumP[T];
+      for (int t = 0; t < T; ++t) {
+        d->P[c][cmp][t] = P;
+        d->P_prev[c][cmp][t] = P_prev;
+        P += 2 * ntot;
+        P_prev += 2 * ntot;
+      }
+      P_size += 2 * ntot * T;
+    }
+  }
+
+  // Third data block
+  d->Ntmp = d->data + G_size + P_size;
+  d->N = d->Ntmp + L; 
+  // initial populations
+  for (size_t i = 0; i < ntot; ++i)
+    for (int l = 0; l < L; ++l)
+      d->N[i * L + l] = N0[l];
+  size_t N_size = L * (ntot + 1);
+
+  // Last data block
+  realnum *V = d->data + G_size + P_size + N_size;
+  realnum *V_prev = V + ntot;
+  DOCMP2 {
+    d->V[cmp] = new realnumP[C];
+    d->V_prev[cmp] = new realnumP[C];
+    for (int cr = 0; cr < C; ++cr)
+    {
+      d->V[cmp][cr] = V;
+      d->V_prev[cmp][cr] = V_prev;
+      V += 2 * ntot;
+      V_prev += 2 * ntot;
+    }
+  }
+}
+
+
+void *multilevel_nonlinear_susceptibility::copy_internal_data(void *data) const {
+  multilevel_extended_data *d = (multilevel_extended_data *)data;
+  if (!d) return 0;
+  multilevel_extended_data *dnew = (multilevel_extended_data *)malloc(d->sz_data);
+  memcpy(dnew, d, d->sz_data);
+  
+  //reassign internal pointers to actual structure
+  size_t ntot = d->ntot;
+
+  dnew->GammaInv = dnew->data;
+  size_t G_size = L * L;
+
+  realnum *P = dnew->data + G_size;
+  realnum *P_prev = P + ntot;
+  size_t P_size = 0;
+  FOR_COMPONENTS(c) DOCMP2 {
+    if (d->P[c][cmp]) {
+      dnew->P[c][cmp] = new realnumP[T];
+      dnew->P_prev[c][cmp] = new realnumP[T];
+      for (int t = 0; t < T; ++t) {
+        dnew->P[c][cmp][t] = P;
+        dnew->P_prev[c][cmp][t] = P_prev;
+        P += 2 * ntot;
+        P_prev += 2 * ntot;
+      }
+      P_size += 2 * ntot * T;
+    }
+  }
+
+  dnew->Ntmp = dnew->data + G_size + P_size;
+  dnew->N = dnew->Ntmp + L;
+  size_t N_size = L * (ntot + 1);
+
+  realnum *V = dnew->data + G_size + P_size + N_size;
+  realnum *V_prev = V + ntot;
+  DOCMP2 {
+    dnew->V[cmp] = new realnumP[C];
+    dnew->V_prev[cmp] = new realnumP[C];
+    for (int cr = 0; cr < C; ++cr)
+    {
+      dnew->V[cmp][cr] = V;
+      dnew->V_prev[cmp][cr] = V_prev;
+      V += 2 * ntot;
+      V_prev += 2 * ntot;
+    }
+  }
+
+  return (void *)dnew;
+}
+
+
+void multilevel_nonlinear_susceptibility::delete_internal_data(void *data) const {
+  if (data) {
+    multilevel_extended_data *d = (multilevel_extended_data *)data;
+    FOR_COMPONENTS(c) DOCMP2 {
+      delete[] d->P[c][cmp];
+      delete[] d->P_prev[c][cmp];
+    }
+    DOCMP2 {
+      delete[] d->V[cmp];
+      delete[] d->V_prev[cmp];
+    }
+    free(data);
+  }
+}
+
+
+int multilevel_nonlinear_susceptibility::num_cinternal_notowned_needed(component c,
+                                                             void *P_internal_data) const {
+  multilevel_extended_data *d = (multilevel_extended_data *)P_internal_data;
+  return d->P[c][0] ? T : 0;
+}
+
+
+realnum *multilevel_nonlinear_susceptibility::cinternal_notowned_ptr(int inotowned, component c, int cmp,
+                                                           int n, void *P_internal_data) const {
+  multilevel_extended_data *d = (multilevel_extended_data *)P_internal_data;
+  if (!d || !d->P[c][cmp] || inotowned < 0 || inotowned >= T) // never true
+    return NULL;
+  return d->P[c][cmp][inotowned] + n;
+}
+
+
 void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONENTS][2],
                                                    realnum *W_prev[NUM_FIELD_COMPONENTS][2],
                                                    double dt, const grid_volume &gv,
                                                    void *P_internal_data) const {
-  multilevel_extended_data *d = (multilevel_extended_data *)P_internal_data;
+  multilevel_extended_data *d = (multilevel_extended_data*)P_internal_data;
   double dt2 = 0.5 * dt;
 
   // field directions and offsets for E * dP dot product.
@@ -498,34 +670,39 @@ void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONEN
     }
   }
 
-  // update v which are responsible for nonradiative oscillations
-  // of nondiagonal elements of density matrix
+  // each V is updated through Lioville equations
+  for (int cp = 0; cp < C; ++cp) {
 
-  for (int cr = 0; cr < C; ++cr) {
-    DOCMP2 {
-      realnum *rev = d->V[0][cmp][cr];
-      realnum *imv = d->V[1][cmp][cr];
+    // figure out which levels this nonradiative transition couples
+    int lp = -1, lm = -1;
+    for (int l = 0; l < L; ++l) {
+      if (beta[l * C + cp] > 0) lp = 1;
+      if (beta[l * C + cp] < 0) lm = 1;
+    }
+    if (lp < 0 || lm < 0) abort("invalid beta array for nonradiative transition %d", cp);
 
+    FOR_COMPONENTS(c) DOCMP2 {
+      const realnum *w = W[c][cmp];
+      const realnum *s = sigma[c][component_direction(c)];
       // 1. autoevolution
       // 2. evolution due to other nonradiative oscillations
-      // 3. evolution due to radiative oscillations
-
-      for (int l = 0; l < L; l++)
+      for (int cpo = 0; cpo < cp; ++cpo)
       {
-        // pick polarization influence
 
-        // pick nonradiative influence
+      }
+      for (int cpo = cp + 1; cpo < C; ++cpo)
+      {
 
+      }
+      // 3. evolution due to radiative oscillations
+      for (int t = 0; t < T; ++t)
+      {
 
-        LOOP_OVER_VOL_OWNED(gv, Centered, i) {
-          rev[i] = ;
-          imv[i] = ;
-        }
       }
     }
   }
 
-  // each P is updated as a damped harmonic oscillator
+  // each P is updated through Liouville equations
   for (int t = 0; t < T; ++t) {
     const double omega2pi = 2 * pi * omega[t];
     const double g2pi = gamma[t] * 2 * pi;
@@ -582,6 +759,27 @@ void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONEN
               pp[i] = pcur;
             }
           }
+        }
+      }
+    }
+  }
+}
+
+void multilevel_susceptibility::subtract_P(field_type ft,
+                                           realnum *f_minus_p[NUM_FIELD_COMPONENTS][2],
+                                           void *P_internal_data) const {
+  multilevel_extended_data *d = (multilevel_extended_data *)P_internal_data;
+  field_type ft2 = ft == E_stuff ? D_stuff : B_stuff; // for sources etc.
+  size_t ntot = d->ntot;
+  for (int t = 0; t < T; ++t) {
+    FOR_FT_COMPONENTS(ft, ec) DOCMP2 {
+      if (d->P[ec][cmp]) {
+        component dc = field_type_component(ft2, ec);
+        if (f_minus_p[dc][cmp]) {
+          realnum *p = d->P[ec][cmp][t];
+          realnum *fmp = f_minus_p[dc][cmp];
+          for (size_t i = 0; i < ntot; ++i)
+            fmp[i] -= p[i];
         }
       }
     }

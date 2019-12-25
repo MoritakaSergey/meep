@@ -372,27 +372,48 @@ protected:
 
 class multilevel_nonlinear_susceptibility : public multilevel_susceptibility {
 public:
-
+  virtual susceptibility *clone() const { return new multilevel_nonlinear_susceptibility(*this); }
   virtual void update_P(realnum *W[NUM_FIELD_COMPONENTS][2],
                         realnum *W_prev[NUM_FIELD_COMPONENTS][2], double dt, const grid_volume &gv,
                         void *P_internal_data) const;
-protected:
-  struct offsets {
-    ptrdiff_t o1[3];
-    ptrdiff_t o2[3];
-  };
 
-  struct directions {
-    component cdot[3] = {Dielectric, Dielectric, Dielectric};
-  };
+  virtual void subtract_P(field_type ft, realnum *f_minus_p[NUM_FIELD_COMPONENTS][2],
+                          void *P_internal_data) const;
+
+  virtual void *new_internal_data(realnum *W[NUM_FIELD_COMPONENTS][2], const grid_volume &gv) const;
+  virtual void init_internal_data(realnum *W[NUM_FIELD_COMPONENTS][2], double dt,
+                                  const grid_volume &gv, void *data) const;
+  virtual void *copy_internal_data(void *data) const; 
+  virtual void delete_internal_data(void *data) const;
+
+  virtual int num_cinternal_notowned_needed(component c, void *P_internal_data) const;
+  virtual realnum *cinternal_notowned_ptr(int inotowned, component c, int cmp, int n,
+                                          void *P_internal_data) const;                    
+protected:
+  struct offsets;
+  struct directions;
 
   int C; // number of nonradiative crossections
+  realnum *beta; // LxC matrix of nonradiative transition coefficients 1/omega
+  realnum *Omega; // C nonradiative transition frequencies
+
   directions pick_field_directions(const void *P_internal_data, const grid_volume &gv) const;
   offsets pick_field_offsets(const void *P_internal_data, const grid_volume &gv) const;
   double sum(int i, int idot, realnum *curr, realnum *prev, offsets offs) const;
   double dif(int i, int idot, realnum *curr, realnum *prev, offsets offs) const;
   double sum(int i, int idot, realnum *vals, offsets offs) const;
+  
 };
+
+struct multilevel_nonlinear_susceptibility::offsets {
+  ptrdiff_t o1[3];
+  ptrdiff_t o2[3];
+};
+
+struct multilevel_nonlinear_susceptibility::directions {
+  component cdot[3] = {Dielectric, Dielectric, Dielectric};
+};
+
 
 class grace;
 
