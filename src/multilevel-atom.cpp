@@ -684,20 +684,56 @@ void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONEN
     FOR_COMPONENTS(c) DOCMP2 {
       const realnum *w = W[c][cmp];
       const realnum *s = sigma[c][component_direction(c)];
-      // 1. autoevolution
-      // 2. evolution due to other nonradiative oscillations
-      for (int cpo = 0; cpo < cp; ++cpo)
+      // autoevolution
+      
+      
+      for (int lk = 0; lk < L; ++lk)
       {
+        for (int transition = 0; transition < T; ++transition)
+        {
+          bool is_coupled_p = alpha[lp * T + transition] != 0;
+          bool is_coupled_k = alpha[lk * T + transition] != 0;
+          bool is_coupled_m = alpha[lm * T + transition] != 0;
 
-      }
-      for (int cpo = cp + 1; cpo < C; ++cpo)
-      {
+          const realnum st = sigmat[5 * transition + component_direction(c)];
+          realnum dRho = 0.0;
 
-      }
-      // 3. evolution due to radiative oscillations
-      for (int t = 0; t < T; ++t)
-      {
 
+          if (is_coupled_p && is_coupled_k)
+          {
+            // evolution due to radiative oscillations
+            LOOP_OVER_VOL_OWNED(gv, c, i) {
+              dRho += st * sigma[i] * w[i];
+            }
+          }
+          if (is_coupled_k && is_coupled_m)
+          {
+            // evolution due to other nonradiative oscillations
+            for (int nonradiative = 0; nonradiative < C; ++nonradiative)
+            {
+              bool is_corresponded_pk = (beta[lp * C + nonradiative] != 0 && beta[lk * C + nonradiative] != 0);
+              if (is_corresponded_pk)
+              {
+                
+                LOOP_OVER_VOL_OWNED(gv, c, i) {
+                  dRho -= st * sigma[i] * w[i];
+                }
+              }
+            }
+            // evolution due to radiative oscillations
+            for (int radiative = 0; radiative < T; ++radiative)
+            {
+              bool is_corresponded_pk = (alpha[lp * T + radiative] != 0 && alpha[lk * T + radiative] != 0);
+              if (is_corresponded_pk)
+              {
+
+                LOOP_OVER_VOL_OWNED(gv, c, i) {
+                  dRho -= st * sigma[i] * w[i];
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
