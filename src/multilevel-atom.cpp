@@ -405,32 +405,35 @@ void multilevel_susceptibility::subtract_P(field_type ft,
 typedef struct {
   size_t sz_data;
   size_t ntot;
-  realnum *GammaInv;                    // inv(1 + Gamma * dt / 2)
-  
+  realnum *GammaInv; // inv(1 + Gamma * dt / 2)
+
   realnumP *P[NUM_FIELD_COMPONENTS][2]; // P[c][cmp][transition][i]
   realnumP *P_prev[NUM_FIELD_COMPONENTS][2];
 
-  realnumP *V[2]; // V[c][crossection][i]
+  realnumP *V[2]; // V[cmp][crossection][i]
   realnumP *V_prev[2];
 
   realnum *N;    // ntot x L array of centered grid populations N[i*L + level]
-  realnum *Ntmp; // temporary length L array of levels, used in updating  
+  realnum *Ntmp; // temporary length L array of levels, used in updating
   realnum data[1];
 } multilevel_extended_data;
 
-
 void *multilevel_nonlinear_susceptibility::new_internal_data(realnum *W[NUM_FIELD_COMPONENTS][2],
-                                                   const grid_volume &gv) const {
+                                                             const grid_volume &gv) const {
   size_t ntot = gv.ntot();
   size_t npol = 0; // number of polarized grid components
   FOR_COMPONENTS(c) DOCMP2 {
-    if (needs_P(c, cmp, W))
-      npol += ntot;
+    if (needs_P(c, cmp, W)) npol += ntot;
   }
 
-  size_t P_size = 2 * npol * T; // number of radiative vector elements (2 because stores current and previous)
-  size_t V_size = 2 * ntot * C; // number of nonradiative scalar elements (2 because stores current and previous)
-  size_t N_size = (ntot + 1) * L; // number of population elements ( + 1*L because stores Ntmp for further calculations)
+  size_t P_size =
+      2 * npol * T; // number of radiative vector elements (2 because stores current and previous)
+  size_t V_size =
+      2 * ntot *
+      C; // number of nonradiative scalar elements (2 because stores current and previous)
+  size_t N_size =
+      (ntot + 1) *
+      L; // number of population elements ( + 1*L because stores Ntmp for further calculations)
   size_t G_size = L * L; // memory for GammaInv
 
   size_t sz = sizeof(multilevel_data) + sizeof(realnum) * (G_size + N_size + P_size + V_size - 1);
@@ -440,9 +443,9 @@ void *multilevel_nonlinear_susceptibility::new_internal_data(realnum *W[NUM_FIEL
   return (void *)d;
 }
 
-
-void multilevel_nonlinear_susceptibility::init_internal_data(realnum *W[NUM_FIELD_COMPONENTS][2], double dt,
-                                                   const grid_volume &gv, void *data) const {
+void multilevel_nonlinear_susceptibility::init_internal_data(realnum *W[NUM_FIELD_COMPONENTS][2],
+                                                             double dt, const grid_volume &gv,
+                                                             void *data) const {
   multilevel_extended_data *d = (multilevel_extended_data *)data;
   size_t sz_data = d->sz_data;
   memset(d, 0, sz_data);
@@ -463,7 +466,7 @@ void multilevel_nonlinear_susceptibility::init_internal_data(realnum *W[NUM_FIEL
   if (!invert(d->GammaInv, L)) abort("multilevel_susceptibility: I + Gamma*dt/2 matrix singular");
   size_t G_size = L * L;
 
-  //Second data block
+  // Second data block
   realnum *P = d->data + G_size;
   realnum *P_prev = P + ntot;
   size_t P_size = 0;
@@ -483,7 +486,7 @@ void multilevel_nonlinear_susceptibility::init_internal_data(realnum *W[NUM_FIEL
 
   // Third data block
   d->Ntmp = d->data + G_size + P_size;
-  d->N = d->Ntmp + L; 
+  d->N = d->Ntmp + L;
   // initial populations
   for (size_t i = 0; i < ntot; ++i)
     for (int l = 0; l < L; ++l)
@@ -496,8 +499,7 @@ void multilevel_nonlinear_susceptibility::init_internal_data(realnum *W[NUM_FIEL
   DOCMP2 {
     d->V[cmp] = new realnumP[C];
     d->V_prev[cmp] = new realnumP[C];
-    for (int cr = 0; cr < C; ++cr)
-    {
+    for (int cr = 0; cr < C; ++cr) {
       d->V[cmp][cr] = V;
       d->V_prev[cmp][cr] = V_prev;
       V += 2 * ntot;
@@ -506,14 +508,13 @@ void multilevel_nonlinear_susceptibility::init_internal_data(realnum *W[NUM_FIEL
   }
 }
 
-
 void *multilevel_nonlinear_susceptibility::copy_internal_data(void *data) const {
   multilevel_extended_data *d = (multilevel_extended_data *)data;
   if (!d) return 0;
   multilevel_extended_data *dnew = (multilevel_extended_data *)malloc(d->sz_data);
   memcpy(dnew, d, d->sz_data);
-  
-  //reassign internal pointers to actual structure
+
+  // reassign internal pointers to actual structure
   size_t ntot = d->ntot;
 
   dnew->GammaInv = dnew->data;
@@ -545,8 +546,7 @@ void *multilevel_nonlinear_susceptibility::copy_internal_data(void *data) const 
   DOCMP2 {
     dnew->V[cmp] = new realnumP[C];
     dnew->V_prev[cmp] = new realnumP[C];
-    for (int cr = 0; cr < C; ++cr)
-    {
+    for (int cr = 0; cr < C; ++cr) {
       dnew->V[cmp][cr] = V;
       dnew->V_prev[cmp][cr] = V_prev;
       V += 2 * ntot;
@@ -556,7 +556,6 @@ void *multilevel_nonlinear_susceptibility::copy_internal_data(void *data) const 
 
   return (void *)dnew;
 }
-
 
 void multilevel_nonlinear_susceptibility::delete_internal_data(void *data) const {
   if (data) {
@@ -573,28 +572,26 @@ void multilevel_nonlinear_susceptibility::delete_internal_data(void *data) const
   }
 }
 
-
-int multilevel_nonlinear_susceptibility::num_cinternal_notowned_needed(component c,
-                                                             void *P_internal_data) const {
+int multilevel_nonlinear_susceptibility::num_cinternal_notowned_needed(
+    component c, void *P_internal_data) const {
   multilevel_extended_data *d = (multilevel_extended_data *)P_internal_data;
   return d->P[c][0] ? T : 0;
 }
 
-
-realnum *multilevel_nonlinear_susceptibility::cinternal_notowned_ptr(int inotowned, component c, int cmp,
-                                                           int n, void *P_internal_data) const {
+realnum *multilevel_nonlinear_susceptibility::cinternal_notowned_ptr(int inotowned, component c,
+                                                                     int cmp, int n,
+                                                                     void *P_internal_data) const {
   multilevel_extended_data *d = (multilevel_extended_data *)P_internal_data;
   if (!d || !d->P[c][cmp] || inotowned < 0 || inotowned >= T) // never true
     return NULL;
   return d->P[c][cmp][inotowned] + n;
 }
 
-
 void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONENTS][2],
                                                    realnum *W_prev[NUM_FIELD_COMPONENTS][2],
                                                    double dt, const grid_volume &gv,
                                                    void *P_internal_data) const {
-  multilevel_extended_data *d = (multilevel_extended_data*)P_internal_data;
+  multilevel_extended_data *d = (multilevel_extended_data *)P_internal_data;
   double dt2 = 0.5 * dt;
 
   // field directions and offsets for E * dP dot product.
@@ -639,14 +636,14 @@ void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONEN
       double gperpdt = gamma[t] * pi * dt;
       for (int idot = 0; idot < 3 && cdot[idot] != Dielectric; ++idot) {
         realnum *p = d->P[cdot[idot]][0][t];
-		    realnum *pp = d->P_prev[cdot[idot]][0][t];
+        realnum *pp = d->P_prev[cdot[idot]][0][t];
         realnum dP = dif(i, idot, p, pp, offs);
         realnum Pave2 = sum(i, idot, p, pp, offs);
 
         EdP32 += dP * E8[idot][0];
         EPave64 += Pave2 * E8[idot][0];
 
-		    bool is_complex = d->P[cdot[idot]][1] != 0;
+        bool is_complex = d->P[cdot[idot]][1] != 0;
         if (is_complex) {
           p = d->P[cdot[idot]][1][t];
           pp = d->P_prev[cdot[idot]][1][t];
@@ -671,70 +668,90 @@ void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONEN
   }
 
   // each V is updated through Lioville equations
-  for (int cp = 0; cp < C; ++cp) {
-
+  for (int crossection = 0; crossection < C; ++crossection) {
     // figure out which levels this nonradiative transition couples
     int lp = -1, lm = -1;
     for (int l = 0; l < L; ++l) {
-      if (beta[l * C + cp] > 0) lp = 1;
-      if (beta[l * C + cp] < 0) lm = 1;
+      if (beta[l * C + crossection] > 0) lp = 1;
+      if (beta[l * C + crossection] < 0) lm = 1;
     }
-    if (lp < 0 || lm < 0) abort("invalid beta array for nonradiative transition %d", cp);
+    if (lp < 0 || lm < 0) abort("invalid beta array for nonradiative transition %d", crossection);
 
-    FOR_COMPONENTS(c) DOCMP2 {
-      const realnum *w = W[c][cmp];
-      const realnum *s = sigma[c][component_direction(c)];
-      // autoevolution
-      
-      
-      for (int lk = 0; lk < L; ++lk)
-      {
-        for (int transition = 0; transition < T; ++transition)
-        {
-          bool is_coupled_p = alpha[lp * T + transition] != 0;
-          bool is_coupled_k = alpha[lk * T + transition] != 0;
-          bool is_coupled_m = alpha[lm * T + transition] != 0;
+    LOOP_OVER_VOL_OWNED(gv, Centered, i) {
+      realnum drho[2] = {0.0, 0.0};
 
-          const realnum st = sigmat[5 * transition + component_direction(c)];
-          realnum dRho = 0.0;
+      FOR_COMPONENTS(c) DOCMP2 {
+        const realnum *w = W[c][cmp];
+        const realnum *s = sigma[c][component_direction(c)];
 
+        // autoevolution
+        const realnum *v = d->V[cmp][crossection];
+        drho[cmp] = - sign(cmp, 0) * gamma_decoherence[crossection] * v[cmp][i];
+        drho[conjugate(cmp)] = - sign(cmp, 1) * omega_nonradiative[crossection] * v[cmp][i];
 
-          if (is_coupled_p && is_coupled_k)
-          {
-            // evolution due to radiative oscillations
-            LOOP_OVER_VOL_OWNED(gv, c, i) {
-              dRho += st * sigma[i] * w[i];
-            }
-          }
-          if (is_coupled_k && is_coupled_m)
-          {
-            // evolution due to other nonradiative oscillations
-            for (int nonradiative = 0; nonradiative < C; ++nonradiative)
-            {
-              bool is_corresponded_pk = (beta[lp * C + nonradiative] != 0 && beta[lk * C + nonradiative] != 0);
-              if (is_corresponded_pk)
-              {
-                
-                LOOP_OVER_VOL_OWNED(gv, c, i) {
-                  dRho -= st * sigma[i] * w[i];
+        for (int lk = 0; lk < L; ++lk) {
+          // determine dipole transitions corresponding to pk and km
+          for (int transition = 0; transition < T; ++transition) {
+            const bool is_coupled_p = alpha[lp * T + transition] != 0;
+            const bool is_coupled_k = alpha[lk * T + transition] != 0;
+            const bool is_coupled_m = alpha[lm * T + transition] != 0;
+
+            //former term in a commutator
+            if (is_coupled_p && is_coupled_k) { 
+              const realnum st = sigmat[5 * transition + component_direction(c)];
+              const realnum interaction_factor = st * sigma[i] * w[i];
+              bool is_index_found = false;
+
+              const int nonradiative = correspond_nonradiative_transition(lk, lm, is_index_found);
+              if (is_index_found) {
+                const realnum *v_current = d->V[cmp][nonradiative];
+                const realnum *v_previous = d->V_prev[cmp][nonradiative];
+                drho[conjugate(cmp)] += sign(cmp, 1) * interaction_factor * (v_current[i] + v_previous[i]) * dt2;
+              }
+              else {
+                const int radiative = correspond_radiative_transition(lk, lm, is_index_found);
+                if (is_index_found) {
+                  const realnum *u_current = d->P[c][cmp][radiative];
+                  const realnum *u_previous = d->P_prev[c][cmp][radiative];
+                  drho[conjugate(cmp)] += sign(cmp, 1) * interaction_factor * (u_current[i] + u_previous[i]) * dt2;
                 }
+                else 
+                  abort("failed to correspond transition index to level indexes");
               }
             }
-            // evolution due to radiative oscillations
-            for (int radiative = 0; radiative < T; ++radiative)
-            {
-              bool is_corresponded_pk = (alpha[lp * T + radiative] != 0 && alpha[lk * T + radiative] != 0);
-              if (is_corresponded_pk)
-              {
 
-                LOOP_OVER_VOL_OWNED(gv, c, i) {
-                  dRho -= st * sigma[i] * w[i];
+            //latter term in a commutator
+            if (is_coupled_k && is_coupled_m) {
+              const realnum st = sigmat[5 * transition + component_direction(c)];
+              const realnum interaction_factor = st * sigma[i] * w[i];
+              bool is_index_found = false;
+
+              const int nonradiative = correspond_nonradiative_transition(lp, lk, is_index_found);
+              if (is_index_found) {
+                const realnum *v_current = d->V[cmp][nonradiative];
+                const realnum *v_previous = d->V_prev[cmp][nonradiative];
+                drho[conjugate(cmp)] -= sign(cmp, 1) * interaction_factor * (v_current[i] + v_previous[i]) * dt2;
+              }
+              else {
+                const int radiative = correspond_radiative_transition(lp, lk, is_index_found);
+                if (is_index_found) {
+                  const realnum *u_current = d->P[c][cmp][radiative];
+                  const realnum *u_previous = d->P_prev[c][cmp][radiative];
+                  drho[conjugate(cmp)] -= sign(cmp, 1) * interaction_factor * (u_current[i] + u_previous[i]) * dt2;
                 }
+                else 
+                  abort("failed to correspond transition index to level indexes");
               }
             }
           }
         }
       }
+
+      d->V_prev[0][crossection][i] = d->V[0][crossection][i];
+      d->V_prev[1][crossection][i] = d->V[1][crossection][i];
+
+      d->V[0][crossection][i] += drho[0];
+      d->V[1][crossection][i] += drho[1];
     }
   }
 
@@ -742,10 +759,10 @@ void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONEN
   for (int t = 0; t < T; ++t) {
     const double omega2pi = 2 * pi * omega[t];
     const double g2pi = gamma[t] * 2 * pi;
-	  const double gperp = gamma[t] * pi;
+    const double gperp = gamma[t] * pi;
     const double omega0dtsqrCorrected = omega2pi * omega2pi * dt * dt + gperp * gperp * dt * dt;
-	  const double gamma1inv = 1 / (1 + g2pi * dt2);
-	  const double gamma1 = (1 - g2pi * dt2);
+    const double gamma1inv = 1 / (1 + g2pi * dt2);
+    const double gamma1 = (1 - g2pi * dt2);
     const double dtsqr = dt * dt;
     // note that gamma[t]*2*pi = 2*gamma_perp as one would usually write it in SALT. -- AWC
 
@@ -801,7 +818,7 @@ void multilevel_nonlinear_susceptibility::update_P(realnum *W[NUM_FIELD_COMPONEN
   }
 }
 
-void multilevel_susceptibility::subtract_P(field_type ft,
+void multilevel_nonlinear_susceptibility::subtract_P(field_type ft,
                                            realnum *f_minus_p[NUM_FIELD_COMPONENTS][2],
                                            void *P_internal_data) const {
   multilevel_extended_data *d = (multilevel_extended_data *)P_internal_data;
@@ -864,11 +881,47 @@ double multilevel_nonlinear_susceptibility::dif(int i, int idot, realnum *curr, 
   return difval;
 }
 
-double multilevel_nonlinear_susceptibility::sum(int i, int idot, realnum *vals, offsets offs) const {
+double multilevel_nonlinear_susceptibility::sum(int i, int idot, realnum *vals,
+                                                offsets offs) const {
   ptrdiff_t *o1 = offs.o1;
   ptrdiff_t *o2 = offs.o2;
   double sumval = vals[i] + vals[i + o1[idot]] + vals[i + o2[idot]] + vals[i + o1[idot] + o2[idot]];
   return sumval;
+}
+
+int multilevel_nonlinear_susceptibility::correspond_radiative_transition(int l1, int l2, bool &is_successfull) const {
+  for (int radiative = 0; radiative < T; ++radiative) { //evolution due to radiative oscillations
+    const bool is_corresponded = (alpha[l1 * T + radiative] != 0 && alpha[l2 * T + radiative] != 0);
+    if (is_corresponded) {
+      is_successfull = true;
+      return radiative;
+    }
+  }
+  return -1;
+}
+
+int multilevel_nonlinear_susceptibility::correspond_nonradiative_transition(int l1, int l2, bool &is_successfull) const {
+  for (int nonradiative = 0; nonradiative < C; ++nonradiative) { // evolution due to nonradiative oscillations
+    const bool is_corresponded = (beta[l1 * C + nonradiative] != 0 && beta[l2 * C + nonradiative] != 0);
+    if (is_corresponded) {
+      is_successfull = true;
+      return nonradiative;
+    }
+  }
+  return -1;
+}
+
+int multilevel_nonlinear_susceptibility::conjugate(int cmp) const {
+  switch (cmp)
+  {
+  case 0:
+    return 1;
+  case 1:
+    return 0;
+  default:
+    abort("Invalid index for a real/imaginary part of a complex number")
+    break;
+  }
 }
 
 } // namespace meep

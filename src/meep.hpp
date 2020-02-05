@@ -395,7 +395,8 @@ protected:
 
   int C; // number of nonradiative crossections
   realnum *beta; // LxC matrix of nonradiative transition coefficients 1/omega
-  realnum *Omega; // C nonradiative transition frequencies
+  realnum *omega_nonradiative; // C nonradiative transition frequencies
+  realnum *gamma_decoherence; // C reversed decoherence times
 
   directions pick_field_directions(const void *P_internal_data, const grid_volume &gv) const;
   offsets pick_field_offsets(const void *P_internal_data, const grid_volume &gv) const;
@@ -403,6 +404,12 @@ protected:
   double dif(int i, int idot, realnum *curr, realnum *prev, offsets offs) const;
   double sum(int i, int idot, realnum *vals, offsets offs) const;
   
+  int correspond_radiative_transition(int l1, int l2, bool &is_successfull) const;
+  int correspond_nonradiative_transition(int l1, int l2, bool &is_successfull) const;
+  // pick Im for cmp=Re, Re for cmp=Im
+  int conjugate(int cmp) const;
+  // return -1 if cmp1==cmp2==Im, otherwise return +1 (??? such or not is necessary)
+  int sign(int cmp1, int cmp2) const;
 };
 
 struct multilevel_nonlinear_susceptibility::offsets {
